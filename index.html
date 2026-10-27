@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Workout Log</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#6c4ff0">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Workout">
 <style>
 :root{
   --bg:#f4f1fb;--surface:#fff;--ink:#231f3a;--muted:#6f6a8a;--line:#e0dcf0;--accent:#6c4ff0;--accent2:#ff5d8f;--accent-ink:#fff;--done:#e6f8ef;--input:#f7f5fd;
@@ -62,6 +68,7 @@ label.f{display:block;font-size:13px;color:var(--muted);margin-bottom:3px}
 .stat:nth-child(1){background:linear-gradient(135deg,#06a77d,#2ec4b6)}
 .stat:nth-child(2){background:linear-gradient(135deg,#f78c1f,#ef476f)}
 .stat b{display:block;font:800 30px "Montserrat","Segoe UI",system-ui,sans-serif}
+textarea{width:100%;min-height:90px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--input);color:var(--ink);font:12px/1.4 monospace;margin-top:8px}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-size:14px}
 </style>
 </head>
@@ -181,15 +188,41 @@ function renderHistory(){
   const logs=[...state.logs].reverse();
   const week=state.logs.filter(l=>(Date.now()-new Date(l.date+"T00:00:00"))<7*864e5).length;
   let h=`<div class="stats"><div class="stat"><b>${week}</b>workouts, last 7 days</div><div class="stat"><b>${streak()}</b>week streak</div></div>`;
-  if(!logs.length)return h+'<div class="empty">No workouts saved yet. Finish a session on the Today tab.</div>';
+  if(!logs.length)return h+'<div class="empty">No workouts saved yet. Finish a session on the Today tab.</div>'+backupHtml();
   return h+logs.map((l,idx)=>{
     const vol=l.exercises.reduce((a,e)=>a+e.sets.filter(s=>s.ok).reduce((b,s)=>b+(+s.w||0)*(+s.r||0),0),0);
     return `<div class="hist"><h3>${l.date} · ${l.day}</h3>${l.exercises.map(e=>{const d=e.sets.filter(s=>s.ok);return d.length?`<p>${esc(e.n)}: ${d.map(s=>(s.w||"–")+"×"+s.r).join(", ")}</p>`:""}).join("")}<p><b>Volume: ${Math.round(vol)} kg</b></p><div class="row"><button class="ghost danger" data-rm="${state.logs.length-1-idx}">Delete</button></div></div>`;
-  }).join("");
+  }).join("")+backupHtml();
+}
+
+function backupHtml(){
+  return `<div class="ex" style="margin-top:16px;--c:var(--accent)"><b>Backup and restore</b>
+    <div class="note">Save a copy of your plan and history, or restore one on a new device.</div>
+    <div class="row"><button class="ghost" id="exp">Export backup</button><button class="ghost" id="imp">Restore backup</button></div>
+    <div class="row"><div><label class="f" for="bfile">Or load a backup file</label><input type="file" id="bfile" accept=".json,application/json"></div></div>
+    <textarea id="bk" aria-label="Backup data" placeholder="Backup data appears here. To restore, paste it here and tap Restore backup."></textarea></div>`;
+}
+function exportData(){
+  const json=JSON.stringify(state),ta=document.getElementById("bk");ta.value=json;
+  try{navigator.clipboard.writeText(json)}catch(e){}
+  try{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([json],{type:"application/json"}));a.download="workout-backup-"+dateKey()+".json";a.click()}catch(e){}
+  toast("Backup created");
+}
+function importData(){
+  const txt=document.getElementById("bk").value.trim();
+  if(!txt){toast("Paste your backup data first");return}
+  try{
+    const p=JSON.parse(txt);
+    if(!p||typeof p.plan!=="object"||!Array.isArray(p.logs))throw 0;
+    if(!confirm("Replace your current plan and history with this backup?"))return;
+    state=p;save();load();draft=null;toast("Backup restored");render();
+  }catch(e){toast("That backup data isn't valid")}
 }
 
 document.addEventListener("click",ev=>{
   const t=ev.target.closest("button");if(!t)return;
+  if(t.id==="exp"){exportData();return}
+  if(t.id==="imp"){importData();return}
   if(t.dataset.tab){tab=t.dataset.tab;render();return}
   if(t.dataset.day){day=t.dataset.day;draft=null;render();return}
   if(t.classList.contains("chk")){const s=draft[t.dataset.i].sets[t.dataset.j];s.ok=!s.ok;render();return}
@@ -217,10 +250,12 @@ document.addEventListener("input",ev=>{
   if(i.dataset.pf){const v=parseInt(i.value);if(v>0){const e=state.plan[day][i.dataset.pe];e[i.dataset.pf]=v;if(e.min>e.max){if(i.dataset.pf==="min")e.max=v;else e.min=v}save();draft=null}}
 });
 document.addEventListener("change",ev=>{
+  if(ev.target.id==="bfile"&&ev.target.files[0]){const r=new FileReader();r.onload=()=>{document.getElementById("bk").value=r.result;toast("File loaded. Tap Restore backup")};r.readAsText(ev.target.files[0])}
   if(ev.target.id==="pick"){document.getElementById("customRow").hidden=!ev.target.value.endsWith("__custom")}
   if(ev.target.dataset.pf)render();
 });
 load();render();
+if("serviceWorker" in navigator&&location.protocol.startsWith("http")){window.addEventListener("load",()=>{try{navigator.serviceWorker.register("sw.js").catch(()=>{})}catch(e){}})}
 </script>
 </body>
 </html>
